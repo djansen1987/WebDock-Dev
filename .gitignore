@@ -1,0 +1,7 @@
+/target
+/data
+/dist
+.env
+!.env.example
+*.pem
+

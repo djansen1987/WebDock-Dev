@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebDock Dev</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <meta name="theme-color" content="#0f172a">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes indeterminate { 0% { left: -40%; } 100% { left: 100%; } }
+    .bar-indeterminate { position: absolute; top: 0; bottom: 0; width: 40%; animation: indeterminate 1.2s ease-in-out infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { display: inline-block; width: 1.5rem; height: 1.5rem; border: 3px solid #475569; border-top-color: #818cf8; border-radius: 9999px; animation: spin 0.8s linear infinite; }
+    .icon { width: 1.1rem; height: 1.1rem; flex: none; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 0.5rem; color: #cbd5e1; transition: background-color .15s, color .15s; }
+    .icon-btn:hover { background: #334155; color: #fff; }
+    .icon-btn.good:hover { background: #047857; }
+    .icon-btn.warn:hover { background: #b45309; }
+    .icon-btn.bad:hover { background: #b91c1c; }
+    .icon-btn.info:hover { background: #0369a1; }
+    .btn { display: inline-flex; align-items: center; gap: .4rem; border-radius: .5rem; padding: .45rem .8rem; font-size: .875rem; font-weight: 500; transition: background-color .15s; }
+    .btn-primary { background: #4f46e5; } .btn-primary:hover { background: #6366f1; }
+    .btn-success { background: #059669; } .btn-success:hover { background: #10b981; }
+    .btn-ghost { background: #334155; } .btn-ghost:hover { background: #475569; }
+    .btn-orange { background: #c2410c; } .btn-orange:hover { background: #ea580c; }
+    .tab { display: inline-flex; align-items: center; gap: .5rem; border-bottom: 2px solid transparent; padding: .75rem 1rem; font-size: .875rem; font-weight: 500; color: #94a3b8; white-space: nowrap; }
+    .tab:hover { color: #e2e8f0; }
+    .tab[aria-selected="true"] { border-color: #818cf8; color: #fff; }
+    .card { border-radius: .75rem; border: 1px solid #1e293b; background: #111c33; }
+    .th { padding: .75rem 1rem; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; }
+    tbody tr { border-top: 1px solid #1e293b; } tbody tr:hover { background: #162239; }
+  </style>
+</head>
+<body class="min-h-full bg-slate-950 text-slate-100 antialiased">
+  <header class="border-b border-slate-800 bg-slate-900">
+    <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+      <div class="flex items-center gap-3">
+        <img src="/icon-192.png" alt="" class="h-9 w-9 rounded-lg">
+        <div>
+          <h1 class="text-base font-semibold leading-tight">WebDock Dev</h1>
+          <p class="text-xs text-slate-400">PHP development environment</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="docker-badge" class="inline-flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1 text-xs"><span id="docker-dot" class="h-2 w-2 rounded-full bg-slate-500"></span><span id="docker-text">Docker …</span></span>
+        <button id="btn-install" class="btn btn-ghost hidden" title="Install as an app with a desktop shortcut"><span data-icon="download"></span>Install app</button>
+        <button id="btn-infra" class="btn btn-primary hidden" title="Start the proxy, MariaDB and phpMyAdmin"><span data-icon="play"></span>Start services</button>
+        <button id="btn-new" class="btn btn-success"><span data-icon="plus"></span>New project</button>
+      </div>
+    </div>
+    <nav class="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-3" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" data-tab-btn="projects"><span data-icon="folder"></span>Projects</button>
+      <button class="tab" role="tab" data-tab-btn="databases"><span data-icon="database"></span>Databases</button>
+      <button class="tab" role="tab" data-tab-btn="software"><span data-icon="shield"></span>Software<span id="tab-badge" class="hidden rounded-full bg-amber-600 px-1.5 text-xs"></span></button>
+      <button class="tab" role="tab" data-tab-btn="services"><span data-icon="server"></span>Services</button>
+      <button class="tab" role="tab" data-tab-btn="system"><span data-icon="cog"></span>System</button>
+    </nav>
+  </header>
+
+  <main class="mx-auto max-w-6xl space-y-4 px-4 py-6">
+    <div id="setup" class="hidden rounded-xl border border-amber-600/60 bg-amber-900/20 p-4 text-sm"></div>
+    <div id="updates-banner" class="hidden rounded-xl border p-4 text-sm"></div>
+
+    <section data-tab="projects" class="hidden">
+      <div class="card overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead><tr><th class="th">Project</th><th class="th">Domain</th><th class="th">PHP</th><th class="th">SSL</th><th class="th">Status</th><th class="th text-right">Actions</th></tr></thead>
+          <tbody id="projects"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section data-tab="databases" class="hidden space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-lg font-semibold">Databases</h2>
+        <div class="flex gap-2">
+          <a id="btn-pma" href="http://localhost:8080" target="_blank" rel="noopener" class="btn btn-orange"><span data-icon="external"></span>Open phpMyAdmin</a>
+          <button id="btn-newdb" class="btn btn-success"><span data-icon="plus"></span>New database</button>
+        </div>
+      </div>
+      <div class="card p-4 text-sm text-slate-300">
+        MariaDB connection for your apps:
+        host <code id="db-host" class="rounded bg-slate-900 px-1"></code>
+        (from PHP containers: <code class="rounded bg-slate-900 px-1">ldp-mariadb</code>),
+        port <code id="db-port" class="rounded bg-slate-900 px-1"></code>,
+        user <code id="db-user" class="rounded bg-slate-900 px-1"></code>,
+        password <code id="db-pass" class="rounded bg-slate-900 px-1"></code>
+        <p id="db-warn" class="mt-2 hidden text-amber-300">Default root password in use. This is fine while MariaDB is only reachable from this PC (it is), but never reuse it elsewhere. Set <code>LDP_DB_ROOT_PASSWORD</code> in <code>%LOCALAPPDATA%\WebDockDev\.env</code> (see <code>.env.example</code>) before the first start to change it.</p>
+      </div>
+      <div class="card overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead><tr><th class="th">Database</th><th class="th">Project</th><th class="th">Tables</th><th class="th">Size</th><th class="th text-right">Actions</th></tr></thead>
+          <tbody id="databases"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section data-tab="software" class="hidden space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-lg font-semibold">Software &amp; security</h2>
+        <div class="flex gap-2">
+          <button id="btn-check" class="btn btn-ghost"><span data-icon="refresh"></span>Check for updates</button>
+          <button id="btn-update-all" class="btn btn-primary"><span data-icon="download"></span>Update all</button>
+        </div>
+      </div>
+      <div class="card overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead><tr><th class="th">Component</th><th class="th">Installed</th><th class="th">Latest</th><th class="th">Status</th><th class="th text-right">Actions</th></tr></thead>
+          <tbody id="software"></tbody>
+        </table>
+      </div>
+      <p id="software-note" class="text-xs text-slate-400"></p>
+    </section>
+
+    <section data-tab="services" class="hidden space-y-4">
+      <h2 class="text-lg font-semibold">Docker services</h2>
+      <div id="containers" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+      <div id="log-section" class="hidden">
+        <div class="mb-2 flex items-center justify-between">
+          <h3 class="font-semibold">Logs: <span id="log-name" class="font-mono"></span></h3>
+          <button id="log-close" class="icon-btn" title="Close logs" aria-label="Close logs"><span data-icon="x"></span></button>
+        </div>
+        <pre id="log-view" class="h-80 overflow-auto rounded-xl border border-slate-800 bg-black p-3 font-mono text-xs text-green-300"></pre>
+      </div>
+    </section>
+
+    <section data-tab="system" class="hidden space-y-6">
+      <div class="space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="text-lg font-semibold">Configuration backup</h2>
+            <p id="backup-status" class="text-sm text-slate-400"></p>
+          </div>
+          <div class="flex gap-2">
+            <button id="btn-backup" class="btn btn-primary"><span data-icon="archive"></span>Create backup</button>
+            <button id="btn-import" class="btn btn-ghost"><span data-icon="upload"></span>Import…</button>
+            <input id="import-file" type="file" accept="application/json,.json" class="hidden">
+          </div>
+        </div>
+        <div class="card overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead><tr><th class="th">Backup</th><th class="th">Created</th><th class="th">Projects</th><th class="th">Size</th><th class="th text-right">Actions</th></tr></thead>
+            <tbody id="backups"></tbody>
+          </table>
+        </div>
+        <p class="text-xs text-slate-400">A backup contains your project list and certificates. Hosts entries and Nginx configuration are rebuilt when you restore. Site files and databases are not included.</p>
+      </div>
+
+      <div class="space-y-3">
+        <h2 class="text-lg font-semibold">Hosts file</h2>
+        <div class="card p-4 text-sm">
+          <p class="mb-2 text-slate-400">Managed block in <span id="hosts-file" class="font-mono"></span></p>
+          <ul id="hosts" class="mb-3 space-y-1 font-mono"></ul>
+          <div class="flex flex-wrap gap-2">
+            <button id="btn-restore" class="btn btn-ghost disabled:opacity-40"><span data-icon="undo"></span>Restore hosts backup</button>
+            <button id="btn-ca" class="btn btn-ghost"><span data-icon="shield"></span>Install mkcert CA</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="dbdialog" class="w-full max-w-sm rounded-xl bg-slate-800 p-0 text-slate-100 backdrop:bg-black/60">
+    <form id="db-form" class="space-y-4 p-6">
+      <h3 class="text-lg font-semibold">New database</h3>
+      <label class="block text-sm">Name
+        <input name="name" required pattern="[A-Za-z0-9_]+" maxlength="63" placeholder="my_database" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+      </label>
+      <div class="flex justify-end gap-2">
+        <button type="button" id="db-cancel" class="btn hover:bg-slate-700">Cancel</button>
+        <button type="submit" class="btn btn-success">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="linkdb" class="w-full max-w-sm rounded-xl bg-slate-800 p-0 text-slate-100 backdrop:bg-black/60">
+    <form id="linkdb-form" class="space-y-4 p-6">
+      <h3 class="text-lg font-semibold">Database for <span id="linkdb-project"></span></h3>
+      <label class="block text-sm">Database name
+        <input name="db_name" required pattern="[A-Za-z0-9_]+" maxlength="63" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+      </label>
+      <label class="block text-sm">SQL file to import (optional)
+        <input name="sql_file" list="linkdb-options" placeholder="db\dump.sql" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+        <datalist id="linkdb-options"></datalist>
+      </label>
+      <p class="text-xs text-slate-400">The database is created if needed, linked to the project and the SQL file is imported into it.</p>
+      <div class="flex justify-end gap-2">
+        <button type="button" id="linkdb-cancel" class="btn hover:bg-slate-700">Cancel</button>
+        <button type="submit" class="btn btn-success">Link</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="wizard" class="w-full max-w-md rounded-xl bg-slate-800 p-0 text-slate-100 backdrop:bg-black/60">
+    <form id="wizard-form" class="space-y-4 p-6">
+      <h3 class="text-lg font-semibold">New project</h3>
+      <div class="grid grid-cols-3 gap-1 rounded-lg bg-slate-900 p-1 text-sm" id="source-tabs">
+        <label class="cursor-pointer rounded px-2 py-1.5 text-center has-[:checked]:bg-indigo-600"><input type="radio" name="source" value="empty" class="sr-only" checked>New empty</label>
+        <label class="cursor-pointer rounded px-2 py-1.5 text-center has-[:checked]:bg-indigo-600"><input type="radio" name="source" value="git" class="sr-only">Clone Git</label>
+        <label class="cursor-pointer rounded px-2 py-1.5 text-center has-[:checked]:bg-indigo-600"><input type="radio" name="source" value="folder" class="sr-only">Existing folder</label>
+      </div>
+      <div data-source="git" class="hidden space-y-3">
+        <label class="block text-sm">Repository URL or owner/repo
+          <input name="git_url" placeholder="https://github.com/owner/repo.git" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+        </label>
+        <label class="block text-sm">Branch (optional)
+          <input name="git_branch" placeholder="default branch" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+        </label>
+        <p id="git-missing" class="hidden text-xs text-amber-400">Git is not installed. Install Git for Windows (https://git-scm.com) first.</p>
+      </div>
+      <div data-source="folder" class="hidden space-y-2">
+        <label class="block text-sm">Project folder
+          <div class="mt-1 flex gap-2">
+            <input name="folder" placeholder="C:\Projects\my-site" class="w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+            <button type="button" id="btn-browse" class="btn hover:bg-slate-700">Browse…</button>
+          </div>
+        </label>
+        <p id="folder-info" class="text-xs text-slate-400"></p>
+      </div>
+      <label class="block text-sm">Name
+        <input name="name" required pattern="[a-z0-9\-]+" placeholder="my-site" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+      </label>
+      <label class="block text-sm">Domain
+        <input name="domain" placeholder="my-site.test" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+      </label>
+      <label class="block text-sm">PHP version
+        <select name="php_version" id="php-select" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600"></select>
+      </label>
+      <label class="block text-sm">Database name (optional)
+        <input name="db_name" pattern="[A-Za-z0-9_]*" placeholder="my_site" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+      </label>
+      <label id="sql-row" class="hidden block text-sm">SQL file to import (optional, needs a database name)
+        <input name="sql_file" list="sql-options" placeholder="C:\path\dump.sql or db\dump.sql" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+        <datalist id="sql-options"></datalist>
+      </label>
+      <label class="block text-sm">Document root (e.g. public for Laravel/Symfony)
+        <input name="docroot" placeholder="public" class="mt-1 w-full rounded bg-slate-900 p-2 ring-1 ring-slate-600">
+      </label>
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="ssl" checked> SSL (HTTPS)</label>
+      <div class="flex justify-end gap-2">
+        <button type="button" id="wizard-cancel" class="btn hover:bg-slate-700">Cancel</button>
+        <button type="submit" class="btn btn-success">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="backup-prompt" class="w-full max-w-md rounded-xl bg-slate-800 p-0 text-slate-100 backdrop:bg-black/60">
+    <div class="space-y-4 p-6">
+      <h3 class="text-lg font-semibold">Back up your configuration?</h3>
+      <p id="backup-prompt-text" class="text-sm text-slate-300"></p>
+      <div class="flex justify-end gap-2">
+        <button id="backup-later" class="btn hover:bg-slate-700">Remind me tomorrow</button>
+        <button id="backup-now" class="btn btn-primary"><span data-icon="archive"></span>Back up now</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Progress overlay used by every action -->
+  <div id="overlay" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="ov-title">
+    <div class="w-full max-w-2xl rounded-xl border border-slate-600 bg-slate-800 p-6 shadow-2xl">
+      <div class="flex items-start gap-3">
+        <div id="ov-icon" class="mt-0.5 flex h-7 w-7 items-center justify-center text-2xl" aria-hidden="true"></div>
+        <div class="min-w-0 flex-1">
+          <h3 id="ov-title" class="truncate text-lg font-semibold"></h3>
+          <p id="ov-message" class="mt-1 truncate text-sm text-slate-300"></p>
+        </div>
+        <span id="ov-time" class="text-xs tabular-nums text-slate-400"></span>
+      </div>
+      <div id="ov-bar-wrap" class="relative mt-4 h-1.5 overflow-hidden rounded bg-slate-700">
+        <div id="ov-bar" class="bar-indeterminate rounded bg-indigo-500"></div>
+      </div>
+      <details id="ov-details" class="mt-4" open>
+        <summary class="cursor-pointer text-sm text-slate-400">Details</summary>
+        <pre id="ov-log" class="mt-2 h-56 overflow-auto whitespace-pre-wrap rounded border border-slate-700 bg-black p-3 font-mono text-xs text-green-300"></pre>
+      </details>
+      <div class="mt-4 flex justify-end gap-2">
+        <button id="ov-copy" class="btn hidden hover:bg-slate-700">Copy log</button>
+        <button id="ov-close" disabled class="btn btn-ghost disabled:cursor-not-allowed disabled:opacity-40">Working…</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
