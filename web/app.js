@@ -186,6 +186,88 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') overlay.cl
 
 /* ---------- Dashboard ---------- */
 
+function gitBadges(g) {
+  const b = [];
+  if (g.ahead) b.push(`<span class="rounded-full bg-indigo-500 px-2.5 py-0.5 text-xs font-semibold text-white ring-2 ring-indigo-300/50" title="${g.ahead} commit(s) to push">↑ ${g.ahead} to push</span>`);
+  if (g.behind) b.push(`<span class="rounded-full bg-amber-500 px-2.5 py-0.5 text-xs font-semibold text-slate-900 ring-2 ring-amber-300/50" title="${g.behind} commit(s) to pull">↓ ${g.behind} to pull</span>`);
+  if (g.changed) b.push(`<span class="rounded-full bg-orange-500 px-2.5 py-0.5 text-xs font-semibold text-slate-900 ring-2 ring-orange-300/50" title="Uncommitted changes">● ${g.changed} changed</span>`);
+  return b.length ? `<div class="mt-1.5 flex flex-wrap gap-1.5 font-normal">${b.join('')}</div>` : '';
+}
+
+/* ---------- Git panel ---------- */
+
+let gitProject = null;
+let gitFiles = [];
+
+const gitCode = (f) => (f.index === '?' ? 'U' : f.worktree !== ' ' ? f.worktree : f.index);
+
+function renderGitFiles() {
+  const checked = new Set([...document.querySelectorAll('#git-files input:checked')].map((i) => i.value));
+  const keep = $('git-files').children.length > 0;
+  $('git-files').innerHTML = gitFiles.length
+    ? gitFiles.map((f) => `<label class="flex items-center gap-2 py-0.5"><input type="checkbox" value="${esc(f.path)}" ${!keep || checked.has(f.path) ? 'checked' : ''}><span class="w-4 text-center text-amber-300">${esc(gitCode(f))}</span><span class="truncate">${esc(f.path)}</span></label>`).join('')
+    : '<div class="p-2 text-slate-400">No changes.</div>';
+  updateGitSelection();
+}
+
+function updateGitSelection() {
+  const boxes = [...document.querySelectorAll('#git-files input')];
+  const n = boxes.filter((i) => i.checked).length;
+  $('git-count').textContent = `Changes (${n}/${boxes.length} selected)`;
+  $('git-all').checked = boxes.length > 0 && n === boxes.length;
+  $('git-all').indeterminate = n > 0 && n < boxes.length;
+}
+
+async function loadGit() {
+  $('git-error').classList.add('hidden');
+  try {
+    const s = await api(`/projects/${encodeURIComponent(gitProject)}/git-status`);
+    gitFiles = s.files;
+    $('git-summary').textContent = `${s.branch || 'detached HEAD'}${s.upstream ? ' → ' + s.upstream : ' (no upstream)'} · ↑${s.ahead} ↓${s.behind}`;
+    renderGitFiles();
+  } catch (e) {
+    $('git-error').textContent = e.message;
+    $('git-error').classList.remove('hidden');
+  }
+}
+
+function openGit(name) {
+  gitProject = name;
+  $('git-project').textContent = name;
+  $('git-files').innerHTML = '';
+  $('git-message').value = '';
+  $('gitdialog').showModal();
+  loadGit();
+}
+
+// The progress overlay sits below a modal dialog, so close the panel before running a job.
+function gitJob(label, action, body) {
+  const n = gitProject;
+  $('gitdialog').close();
+  runJob(`${label} "${n}"`, `/projects/${encodeURIComponent(n)}/${action}`, { method: 'POST', body });
+}
+
+function gitCommit(push) {
+  const message = $('git-message').value.trim();
+  const boxes = [...document.querySelectorAll('#git-files input')];
+  const sel = boxes.filter((i) => i.checked).map((i) => i.value);
+  const err = !message ? 'Enter a commit message.' : !sel.length ? 'Select at least one file.' : '';
+  $('git-error').textContent = err;
+  $('git-error').classList.toggle('hidden', !err);
+  if (err) return;
+  gitJob(push ? 'Commit & push' : 'Commit', 'git-commit', { message, paths: sel.length === boxes.length ? null : sel, push });
+}
+
+$('git-close').onclick = () => $('gitdialog').close();
+$('git-refresh').onclick = loadGit;
+$('git-fetch').onclick = () => gitJob('Git fetch', 'git-fetch');
+$('git-pull').onclick = () => gitJob('Git pull', 'git-pull');
+$('git-push').onclick = () => gitJob('Git push', 'git-push');
+$('git-commit').onclick = () => gitCommit(false);
+$('git-commit-push').onclick = () => gitCommit(true);
+$('git-all').onchange = (ev) => { document.querySelectorAll('#git-files input').forEach((i) => { i.checked = ev.target.checked; }); updateGitSelection(); };
+$('git-files').onchange = updateGitSelection;
+
 function badge(on, yes, no) {
   return `<span class="rounded-full px-2 py-0.5 text-xs ${on ? 'bg-emerald-700' : 'bg-slate-600'}">${on ? yes : no}</span>`;
 }
@@ -215,7 +297,7 @@ async function refresh() {
     // Do not rebuild the table while the user is picking a PHP version.
     if (!document.activeElement?.matches?.('select[data-php]')) $('projects').innerHTML = projects.length ? projects.map((p) => `
       <tr class="border-t border-slate-700">
-        <td class="p-3 font-medium">${esc(p.name)}<div class="max-w-xs truncate font-mono text-xs font-normal text-slate-400" title="${esc(p.web_root)}">${esc(p.path)}</div>${p.git ? `<div class="max-w-xs truncate text-xs font-normal text-slate-400" title="${esc(p.git.remote || '')}">${icon('branch')} ${esc(p.git.branch || 'detached')}${p.git.remote ? ' · ' + esc(p.git.remote) : ''}</div>` : ''}${p.custom_path ? '<div class="text-xs font-normal text-slate-500">Custom folder (not copied)</div>' : ''}${p.db_name ? `<div class="text-xs font-normal text-slate-400">DB: ${esc(p.db_name)}</div>` : ''}</td>
+        <td class="p-3 font-medium">${esc(p.name)}<div class="max-w-xs truncate font-mono text-xs font-normal text-slate-400" title="${esc(p.web_root)}">${esc(p.path)}</div>${p.git ? `<div class="max-w-xs truncate text-xs font-normal text-slate-400" title="${esc(p.git.remote || '')}">${icon('branch')} ${esc(p.git.branch || 'detached')}${p.git.remote ? ' · ' + esc(p.git.remote) : ''}</div>` : ''}${p.custom_path ? '<div class="text-xs font-normal text-slate-500">Custom folder (not copied)</div>' : ''}${p.db_name ? `<div class="text-xs font-normal text-slate-400">DB: ${esc(p.db_name)}</div>` : ''}${p.git ? gitBadges(p.git) : ''}</td>
         <td class="p-3"><a class="text-sky-400 hover:underline" target="_blank" href="${esc(p.url)}">${esc(p.domain)}</a></td>
         <td class="p-3"><select data-php="${esc(p.name)}" title="Change PHP version" class="rounded bg-slate-900 px-1 py-0.5 ring-1 ring-slate-600">${st.php_versions.map((v) => `<option value="${esc(v)}" ${v === p.php_version ? 'selected' : ''}>${esc(v)}${phpNote(st, v)}</option>`).join('')}</select></td>
         <td class="p-3">${p.ssl ? badge(p.ssl_ready, 'active', 'missing') : badge(false, '', 'off')}</td>
@@ -224,7 +306,7 @@ async function refresh() {
           ${ilink(p.url, 'globe', 'Open site', 'info')}
           ${ibtn(`data-p="${esc(p.name)}" data-a="folder"`, 'folder', 'Open folder')}
           ${st.vscode ? ibtn(`data-p="${esc(p.name)}" data-a="vscode"`, 'code', 'Edit in VS Code', 'info') : ''}
-          ${p.git ? ibtn(`data-p="${esc(p.name)}" data-a="git-pull"`, 'download', 'Git pull', 'info') : ''}
+          ${p.git ? ibtn(`data-p="${esc(p.name)}" data-a="git"`, 'branch', 'Git: changes, commit, push, pull', 'info') : ''}
           ${ibtn(`data-p="${esc(p.name)}" data-a="dbl"`, 'database', p.db_name ? 'Database / import SQL' : 'Create & link database', 'info')}
           ${p.enabled
             ? ibtn(`data-p="${esc(p.name)}" data-a="restart"`, 'restart', 'Restart', 'warn') + ibtn(`data-p="${esc(p.name)}" data-a="stop"`, 'stop', 'Stop', 'bad')
@@ -339,17 +421,17 @@ function renderUpdates(rep) {
     eol:  ['End of life', 'bg-red-700'],
     security_only: ['Security fixes only', 'bg-amber-700'],
     supported: ['Supported', 'bg-emerald-700'],
-    unknown: ['Unknown', 'bg-slate-600'],
   };
   $('software').innerHTML = rep.components.map((c) => {
-    const [text, cls] = label[c.support] || label.unknown;
+    // No badge when support data is unavailable (offline, or the product is no longer listed).
+    const [text, cls] = label[c.support] || [];
     const upd = c.image_update === true ? '<span class="ml-1 rounded-full bg-sky-700 px-2 py-0.5 text-xs">Update available</span>'
       : c.image_update === false ? '<span class="ml-1 rounded-full bg-slate-600 px-2 py-0.5 text-xs">Up to date</span>' : '';
     return `<tr class="border-t border-slate-700">
       <td class="p-3 font-medium">${esc(c.name)}<div class="font-mono text-xs font-normal text-slate-400">${esc(c.image)}</div>${c.id.startsWith('php') && c.id !== 'phpmyadmin' ? `<div class="text-xs font-normal text-slate-400">${c.used_by?.length ? 'Used by: ' + esc(c.used_by.join(', ')) : 'Not used by any project'}</div>` : ''}</td>
       <td class="p-3 font-mono">${esc(c.installed || '—')}</td>
       <td class="p-3 font-mono">${esc(c.latest || '—')}</td>
-      <td class="p-3"><span class="rounded-full px-2 py-0.5 text-xs ${cls}">${text}</span>${c.eol_date ? ` <span class="text-xs text-slate-400">until ${esc(c.eol_date)}</span>` : ''}${upd}</td>
+      <td class="p-3">${text ? `<span class="rounded-full px-2 py-0.5 text-xs ${cls}">${text}</span>` : ''}${c.eol_date ? ` <span class="text-xs text-slate-400">until ${esc(c.eol_date)}</span>` : ''}${upd}</td>
       <td class="space-x-1 p-3 text-right">${c.image_update === false ? '' : ibtn(`data-upd="${esc(c.id)}"`, 'download', 'Update', 'info')}${c.removable ? ibtn(`data-rmphp="${esc(c.id.slice(3, 4) + '.' + c.id.slice(4))}"`, 'trash', 'Remove', 'bad') : ''}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="5" class="p-6 text-center text-slate-400">No containers yet.</td></tr>';
@@ -463,6 +545,7 @@ document.addEventListener('click', (ev) => {
     if (a === 'folder') return api(`/projects/${n}/open-folder`, { method: 'POST' }).catch((e) => alert(e.message));
     if (a === 'vscode') return api(`/projects/${n}/vscode`, { method: 'POST' }).catch((e) => alert(e.message));
     if (a === 'dbl') return openLinkDb(n).catch((e) => alert(e.message));
+    if (a === 'git') return openGit(n);
     if (a === 'delete') {
       if (!confirm(`Delete project "${n}" (hosts entry, certificate and vhost)? Site files are kept.`)) return;
       runJob(`Deleting project "${n}"`, `/projects/${n}`, { method: 'DELETE' });

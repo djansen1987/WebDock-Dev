@@ -176,6 +176,34 @@
     </form>
   </dialog>
 
+  <dialog id="gitdialog" class="w-full max-w-2xl rounded-xl bg-slate-800 p-0 text-slate-100 backdrop:bg-black/60">
+    <div class="space-y-4 p-6">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h3 class="text-lg font-semibold">Git: <span id="git-project"></span></h3>
+          <p id="git-summary" class="truncate text-sm text-slate-400"></p>
+        </div>
+        <button type="button" id="git-close" class="btn hover:bg-slate-700">Close</button>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" id="git-refresh" class="btn hover:bg-slate-700">Refresh</button>
+        <button type="button" id="git-fetch" class="btn hover:bg-slate-700">Fetch</button>
+        <button type="button" id="git-pull" class="btn hover:bg-slate-700">Pull</button>
+        <button type="button" id="git-push" class="btn hover:bg-slate-700">Push</button>
+      </div>
+      <p id="git-error" class="hidden text-sm text-red-400"></p>
+      <div>
+        <label class="mb-1 flex items-center gap-2 text-sm"><input type="checkbox" id="git-all" checked> <span id="git-count">Changes</span></label>
+        <div id="git-files" class="max-h-64 overflow-auto rounded bg-slate-900 p-2 font-mono text-xs ring-1 ring-slate-700"></div>
+      </div>
+      <textarea id="git-message" rows="3" placeholder="Commit message" class="w-full rounded bg-slate-900 p-2 text-sm ring-1 ring-slate-600"></textarea>
+      <div class="flex justify-end gap-2">
+        <button type="button" id="git-commit" class="btn btn-success">Commit</button>
+        <button type="button" id="git-commit-push" class="btn btn-primary">Commit &amp; Push</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="linkdb" class="w-full max-w-sm rounded-xl bg-slate-800 p-0 text-slate-100 backdrop:bg-black/60">
     <form id="linkdb-form" class="space-y-4 p-6">
       <h3 class="text-lg font-semibold">Database for <span id="linkdb-project"></span></h3>

@@ -14,6 +14,155 @@ pub struct GitInfo {
     pub branch: Option<String>,
     /// URL of `origin` with any embedded credentials removed.
     pub remote: Option<String>,
+    pub upstream: Option<String>,
+    /// Commits not yet pushed.
+    pub ahead: u32,
+    /// Commits on the upstream that are not pulled yet.
+    pub behind: u32,
+    /// Number of files with uncommitted changes (including untracked).
+    pub changed: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FileChange {
+    pub path: String,
+    /// Status in the index (first porcelain column), ' ' when unchanged.
+    pub index: char,
+    /// Status in the work tree (second porcelain column).
+    pub worktree: char,
+}
+
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+pub struct Status {
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub files: Vec<FileChange>,
+}
+
+/// Parses `git status --porcelain=v1 -b -z` output.
+fn parse_status(raw: &str) -> Status {
+    let mut st = Status::default();
+    let mut parts = raw.split('\0');
+    while let Some(entry) = parts.next() {
+        if let Some(head) = entry.strip_prefix("## ") {
+            let (names, counts) = match head.find(" [") {
+                Some(i) => (&head[..i], Some(head[i + 2..].trim_end_matches(']'))),
+                None => (head, None),
+            };
+            if let Some(rest) = names.strip_prefix("No commits yet on ") {
+                st.branch = Some(rest.to_string());
+            } else if names.starts_with("HEAD (no branch)") {
+                st.branch = None;
+            } else if let Some((b, u)) = names.split_once("...") {
+                st.branch = Some(b.to_string());
+                st.upstream = Some(u.to_string());
+            } else {
+                st.branch = Some(names.to_string());
+            }
+            for c in counts.unwrap_or("").split(", ") {
+                if let Some(n) = c.strip_prefix("ahead ") {
+                    st.ahead = n.parse().unwrap_or(0);
+                } else if let Some(n) = c.strip_prefix("behind ") {
+                    st.behind = n.parse().unwrap_or(0);
+                }
+            }
+        } else if entry.len() > 3 {
+            let mut ch = entry.chars();
+            let (index, worktree) = (ch.next().unwrap(), ch.next().unwrap());
+            st.files.push(FileChange { path: entry[3..].to_string(), index, worktree });
+            // A rename/copy entry is followed by the original path.
+            if index == 'R' || index == 'C' {
+                parts.next();
+            }
+        }
+    }
+    st
+}
+
+pub async fn status(dir: &Path) -> AppResult<Status> {
+    require_git()?;
+    let mut cmd = git_cmd();
+    cmd.arg("-C").arg(dir).args(["status", "--porcelain=v1", "-b", "-z", "-uall"]).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let o = tokio::time::timeout(Duration::from_secs(20), cmd.output())
+        .await
+        .map_err(|_| AppError::BadRequest("git status timed out".into()))?
+        .map_err(|e| AppError::BadRequest(format!("could not run git: {e}")))?;
+    if !o.status.success() {
+        return Err(AppError::BadRequest(format!("git status failed: {}", String::from_utf8_lossy(&o.stderr).trim())));
+    }
+    Ok(parse_status(&String::from_utf8_lossy(&o.stdout)))
+}
+
+/// Rejects paths that could escape the repository or be read as git options.
+fn validate_rel_path(p: &str) -> AppResult<()> {
+    let bad = p.is_empty()
+        || p.starts_with('-')
+        || p.contains('\0')
+        || Path::new(p).is_absolute()
+        || p.split(['/', '\\']).any(|s| s == "..");
+    if bad {
+        return Err(AppError::BadRequest(format!("invalid file path: {p}")));
+    }
+    Ok(())
+}
+
+/// Stages `paths` (everything when None) and commits with `message`.
+pub async fn commit(dir: &Path, message: &str, paths: Option<&[String]>, log: &JobLog) -> AppResult<()> {
+    require_git()?;
+    if message.trim().is_empty() {
+        return Err(AppError::BadRequest("enter a commit message".into()));
+    }
+    let mut add = git_cmd();
+    add.arg("-C").arg(dir).args(["add"]);
+    match paths {
+        None => {
+            log.push("Staging all changes ...");
+            add.arg("-A");
+        }
+        Some([]) => return Err(AppError::BadRequest("select at least one file to commit".into())),
+        Some(list) => {
+            for p in list {
+                validate_rel_path(p)?;
+            }
+            log.push(format!("Staging {} file(s) ...", list.len()));
+            add.arg("--").args(list);
+        }
+    }
+    run_streaming(add, log, "git add").await?;
+    log.push("Committing ...");
+    let mut cmd = git_cmd();
+    cmd.arg("-C").arg(dir).args(["commit", "-m", message.trim()]);
+    if paths.is_some() {
+        // Only commit what was selected, even if other files were staged before.
+        cmd.arg("--only").arg("--").args(paths.unwrap());
+    }
+    run_streaming(cmd, log, "git commit").await
+}
+
+pub async fn push(dir: &Path, log: &JobLog) -> AppResult<()> {
+    require_git()?;
+    let st = status(dir).await?;
+    let mut cmd = git_cmd();
+    cmd.arg("-C").arg(dir).arg("push").arg("--progress");
+    if st.upstream.is_none() {
+        let branch = st.branch.ok_or_else(|| AppError::BadRequest("cannot push a detached HEAD".into()))?;
+        validate_branch(&branch)?;
+        log.push(format!("Running git push --set-upstream origin {branch} ..."));
+        cmd.args(["--set-upstream", "origin", &branch]);
+    } else {
+        log.push("Running git push ...");
+    }
+    run_streaming(cmd, log, "git push").await
+}
+
+pub async fn fetch(dir: &Path, log: &JobLog) -> AppResult<()> {
+    require_git()?;
+    log.push("Running git fetch ...");
+    let mut cmd = git_cmd();
+    cmd.arg("-C").arg(dir).args(["fetch", "--progress"]);
+    run_streaming(cmd, log, "git fetch").await
 }
 
 pub fn available() -> bool {
@@ -197,12 +346,36 @@ pub async fn info(dir: &Path) -> Option<GitInfo> {
     if !dir.join(".git").exists() {
         return None;
     }
-    let branch = out(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
     let remote = out(dir, &["remote", "get-url", "origin"]).await.map(|u| redact(&u));
-    Some(GitInfo { branch, remote })
+    let st = status(dir).await.unwrap_or_default();
+    Some(GitInfo { branch: st.branch, remote, upstream: st.upstream, ahead: st.ahead, behind: st.behind, changed: st.files.len() as u32 })
 }
 
 static CACHE: Mutex<Option<HashMap<String, (Instant, Option<GitInfo>)>>> = Mutex::new(None);
+static FETCHED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+
+/// Quietly fetches in the background (at most every 5 minutes per repository) so "behind" stays current.
+fn maybe_background_fetch(dir: &Path, info: &GitInfo) {
+    if info.upstream.is_none() {
+        return;
+    }
+    let key = dir.to_string_lossy().to_string();
+    {
+        let mut g = FETCHED.lock().unwrap();
+        let m = g.get_or_insert_with(HashMap::new);
+        if m.get(&key).is_some_and(|t| t.elapsed() < Duration::from_secs(300)) {
+            return;
+        }
+        m.insert(key, Instant::now());
+    }
+    let dir = dir.to_path_buf();
+    tokio::spawn(async move {
+        let mut cmd = git_cmd();
+        cmd.arg("-C").arg(&dir).args(["fetch", "--quiet"]).stdout(Stdio::null()).stderr(Stdio::null());
+        let _ = tokio::time::timeout(Duration::from_secs(60), cmd.status()).await;
+        forget(&dir);
+    });
+}
 
 /// `info` with a 30 second cache, because the dashboard polls the project list every few seconds.
 pub async fn info_cached(dir: &Path) -> Option<GitInfo> {
@@ -213,6 +386,9 @@ pub async fn info_cached(dir: &Path) -> Option<GitInfo> {
         }
     }
     let v = info(dir).await;
+    if let Some(i) = &v {
+        maybe_background_fetch(dir, i);
+    }
     CACHE.lock().unwrap().get_or_insert_with(HashMap::new).insert(key, (Instant::now(), v.clone()));
     v
 }
@@ -235,6 +411,27 @@ mod tests {
         assert!(normalize_url("--upload-pack=calc").is_err());
         assert!(normalize_url("ext::sh -c calc").is_err());
         assert!(normalize_url("file:///c/x").is_err());
+    }
+
+    #[test]
+    fn parses_status() {
+        let raw = "## main...origin/main [ahead 2, behind 1]\0 M src/a.rs\0?? new file.txt\0R  b.rs\0a.rs\0";
+        let st = parse_status(raw);
+        assert_eq!((st.branch.as_deref(), st.upstream.as_deref(), st.ahead, st.behind), (Some("main"), Some("origin/main"), 2, 1));
+        assert_eq!(st.files.len(), 3);
+        assert_eq!(st.files[1].path, "new file.txt");
+        assert_eq!(st.files[2].path, "b.rs");
+        let st = parse_status("## No commits yet on dev\0");
+        assert_eq!(st.branch.as_deref(), Some("dev"));
+        assert!(st.upstream.is_none());
+    }
+
+    #[test]
+    fn rel_paths() {
+        assert!(validate_rel_path("src/a.rs").is_ok());
+        assert!(validate_rel_path("../x").is_err());
+        assert!(validate_rel_path("-rf").is_err());
+        assert!(validate_rel_path("C:\\x").is_err());
     }
 
     #[test]

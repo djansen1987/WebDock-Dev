@@ -42,6 +42,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/projects/:name/php", post(set_project_php))
         .route("/api/projects/:name/database", post(link_project_database))
         .route("/api/projects/:name/git-pull", post(git_pull))
+        .route("/api/projects/:name/git-status", get(git_status))
+        .route("/api/projects/:name/git-commit", post(git_commit))
+        .route("/api/projects/:name/git-push", post(git_push))
+        .route("/api/projects/:name/git-fetch", post(git_fetch))
         .route("/api/projects/:name/sql-files", get(project_sql_files))
         .route("/api/inspect-folder", post(inspect_folder))
         .route("/api/pick-folder", post(pick_folder))
@@ -245,6 +249,67 @@ async fn link_project_database(State(s): State<AppState>, Path(name): Path<Strin
     let title = format!("Database for \"{name}\"");
     spawn_job(&s, title, move |s, log| async move {
         projects::link_database(&s.cfg, &s.docker, &name, &b.db_name, b.sql_file.as_deref(), &log).await
+    })
+}
+
+fn git_project_dir(s: &AppState, name: &str) -> AppResult<std::path::PathBuf> {
+    let p = projects::load(&s.cfg)?.into_iter().find(|p| p.name == name).ok_or_else(|| AppError::NotFound("project not found".into()))?;
+    let dir = projects::site_path(&s.cfg, &p);
+    if !dir.join(".git").exists() {
+        return Err(AppError::BadRequest("this project folder is not a Git repository".into()));
+    }
+    Ok(dir)
+}
+
+async fn git_status(State(s): State<AppState>, Path(name): Path<String>) -> AppResult<Json<Value>> {
+    let dir = git_project_dir(&s, &name)?;
+    let st = crate::git::status(&dir).await?;
+    Ok(Json(json!(st)))
+}
+
+#[derive(Deserialize)]
+struct GitCommitInput {
+    message: String,
+    /// None = commit all changes.
+    paths: Option<Vec<String>>,
+    #[serde(default)]
+    push: bool,
+}
+
+async fn git_commit(State(s): State<AppState>, Path(name): Path<String>, Json(b): Json<GitCommitInput>) -> (StatusCode, Json<Value>) {
+    let title = if b.push { format!("Git commit & push \"{name}\"") } else { format!("Git commit \"{name}\"") };
+    spawn_job(&s, title, move |s, log| async move {
+        let dir = git_project_dir(&s, &name)?;
+        let res = async {
+            crate::git::commit(&dir, &b.message, b.paths.as_deref(), &log).await?;
+            if b.push {
+                crate::git::push(&dir, &log).await?;
+            }
+            Ok(())
+        }
+        .await;
+        crate::git::forget(&dir);
+        res
+    })
+}
+
+async fn git_push(State(s): State<AppState>, Path(name): Path<String>) -> (StatusCode, Json<Value>) {
+    let title = format!("Git push \"{name}\"");
+    spawn_job(&s, title, move |s, log| async move {
+        let dir = git_project_dir(&s, &name)?;
+        let res = crate::git::push(&dir, &log).await;
+        crate::git::forget(&dir);
+        res
+    })
+}
+
+async fn git_fetch(State(s): State<AppState>, Path(name): Path<String>) -> (StatusCode, Json<Value>) {
+    let title = format!("Git fetch \"{name}\"");
+    spawn_job(&s, title, move |s, log| async move {
+        let dir = git_project_dir(&s, &name)?;
+        let res = crate::git::fetch(&dir, &log).await;
+        crate::git::forget(&dir);
+        res
     })
 }
 

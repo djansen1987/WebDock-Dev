@@ -1,5 +1,6 @@
 /target
-/data 
+/data
+/dist
 .env
 !.env.example
 *.pem
